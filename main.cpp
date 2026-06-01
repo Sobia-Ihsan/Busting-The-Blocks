@@ -1,240 +1,272 @@
 #include <SFML/Graphics.hpp>
-#include <string>
 #include <ctime>
+#include <cstdlib>
 
 using namespace sf;
-using namespace std;
 
 // Grid dimensions
 const int ROWS = 20;
 const int COLS = 10;
 const int TILE_SIZE = 30;
 
-// Backend PF Logic Grid
-int grid[ROWS][COLS] = { 0 };
+// BACKEND PF GRID: 0 matlab khali space, baki numbers matlab filled blocks
+int gameGrid[ROWS][COLS] = { 0 };
 
-// Standard Shapes (Relative coordinates)
-int shapes[7][4] = {
-    1,3, 5,7, // 0: I (Cyan)
-    2,4, 5,7, // 1: Z (Red)
-    3,5, 4,6, // 2: S (Green)
-    3,5, 4,7, // 3: T (Purple)
-    2,3, 5,7, // 4: L (Orange)
-    3,5, 7,6, // 5: J (Blue)
-    2,3, 4,5, // 6: O (Yellow)
-};
-
-// Colors for the 7 shapes
-Color colors[7] = {
-    Color::Cyan,
-    Color::Red,
-    Color::Green,
-    Color(128, 0, 128), // Purple
-    Color(255, 165, 0), // Orange
-    Color::Blue,
-    Color::Yellow
-};
-
-struct Point { int x, y; } falling_shape_points[4], backup_points[4];
-
-// Global Variables
-float timer = 0, delay = 0.3;
-int score = 0;
-bool gameOver = false;
-
-// Nayi shape spawn karna
-void spawnNewShape(int& dx, int& n) {
-    n = rand() % 7;
-    for (int i = 0; i < 4; i++) {
-        falling_shape_points[i].x = shapes[n][i] % 2 + 4; // Centered at top
-        falling_shape_points[i].y = shapes[n][i] / 2;
+// SHAPES MATRIX: 1 matlab block mojood hai, 0 matlab khali hai
+int shapes[7][4][4] = {
+    // 0: I-Shape
+    {
+        {0,0,0,0},
+        {1,1,1,1},
+        {0,0,0,0},
+        {0,0,0,0}
+    },
+    // 1: Z-Shape
+    {
+        {1,1,0,0},
+        {0,1,1,0},
+        {0,0,0,0},
+        {0,0,0,0}
+    },
+    // 2: S-Shape
+    {
+        {0,1,1,0},
+        {1,1,0,0},
+        {0,0,0,0},
+        {0,0,0,0}
+    },
+    // 3: T-Shape
+    {
+        {0,1,0,0},
+        {1,1,1,0},
+        {0,0,0,0},
+        {0,0,0,0}
+    },
+    // 4: L-Shape
+    {
+        {1,0,0,0},
+        {1,1,1,0},
+        {0,0,0,0},
+        {0,0,0,0}
+    },
+    // 5: J-Shape
+    {
+        {0,0,1,0},
+        {1,1,1,0},
+        {0,0,0,0},
+        {0,0,0,0}
+    },
+    // 6: O-Shape
+    {
+        {1,1,0,0},
+        {1,1,0,0},
+        {0,0,0,0},
+        {0,0,0,0}
     }
-    dx = 0;
+};
+
+// Colors for shapes
+Color shapeColors[7] = {
+    Color::Cyan, Color::Red, Color::Green,
+    Color(128, 0, 128), Color(255, 165, 0),
+    Color::Blue, Color::Yellow
+};
+
+// Current falling shape details
+int currentShape[4][4];
+int currentX = 3; // Center top position
+int currentY = 0;
+int currentType = 0;
+
+// Game states
+float gameTimer = 0;
+float dropDelay = 0.3;
+bool isGameOver = false;
+
+// Nayi shape pick kar ke copy karne ka function
+void spawnNewShape() {
+    currentType = rand() % 7;
+    currentX = 3; // Top center starting point
+    currentY = 0;
+
+    // Simple PF concept: Aik array se data doosri array mein copy karna
+    for (int r = 0; r < 4; r++) {
+        for (int c = 0; c < 4; c++) {
+            currentShape[r][c] = shapes[currentType][r][c];
+        }
+    }
 }
 
-// Collision Check Function
-bool check() {
-    for (int i = 0; i < 4; i++) {
-        if (falling_shape_points[i].x < 0 || falling_shape_points[i].x >= COLS || falling_shape_points[i].y >= ROWS) {
-            return false; // Boundary check
-        }
-        else if (grid[falling_shape_points[i].y][falling_shape_points[i].x] != 0) {
-            return false; // Collision with already placed blocks
+// COLLISION CHECK: Simple array boundary aur grid state check logic
+bool isValidMove(int targetX, int targetY, int tempShape[4][4]) {
+    for (int r = 0; r < 4; r++) {
+        for (int c = 0; c < 4; c++) {
+            if (tempShape[r][c] == 1) { // Agar shape ka block mojood hai
+                int nextX = targetX + c;
+                int nextY = targetY + r;
+
+                // Boundary Checks (Diwaron se bahar na jaye)
+                if (nextX < 0 || nextX >= COLS || nextY >= ROWS) {
+                    return false;
+                }
+                // Grid Overlap Check (Pehle se mojood blocks se na takraye)
+                if (nextY >= 0 && gameGrid[nextY][nextX] != 0) {
+                    return false;
+                }
+            }
         }
     }
     return true;
 }
 
+// ROTATION LOGIC: 2D Array Matrix Transpose aur Reverse ka simple PF concept
+void rotateShape() {
+    int rotated[4][4] = { 0 };
+
+    // Standard Matrix Rotation concept (Rows ko Columns banana)
+    for (int r = 0; r < 4; r++) {
+        for (int c = 0; c < 4; c++) {
+            rotated[c][3 - r] = currentShape[r][c];
+        }
+    }
+
+    // Agar move valid hai toh original shape ko update karo
+    if (isValidMove(currentX, currentY, rotated)) {
+        for (int r = 0; r < 4; r++) {
+            for (int c = 0; c < 4; c++) {
+                currentShape[r][c] = rotated[r][c];
+            }
+        }
+    }
+}
+
 int main() {
     srand(time(0));
+
+    // Window setup (Score area khatam kar ke width choti kar di taake sirf grid dikhe)
+    RenderWindow window(VideoMode(COLS * TILE_SIZE, ROWS * TILE_SIZE), "Tetris - Pure PF Project");
+
+    // FIXED BACKGROUND IMAGE LOGIC
+    Texture bgTexture;
+    bgTexture.loadFromFile("images/background.jpg");
+    Sprite backgroundSprite(bgTexture);
     
-    // Window create ki (Grid + Score Area)
-    RenderWindow window(VideoMode(COLS * TILE_SIZE + 150, ROWS * TILE_SIZE), "Tetris - Final PF Project");
+    // Scaling background to fit window size
+    Vector2u bgSize = bgTexture.getSize();
+    backgroundSprite.setScale((float)(COLS * TILE_SIZE) / bgSize.x, (float)(ROWS * TILE_SIZE) / bgSize.y);
 
-    // Background Setup
-    Texture bg_tex;
-    bg_tex.loadFromFile("images/background.jpg"); 
-    Sprite s_bg(bg_tex);
+    // SFML Rectangle Setup (Drawing ke liye single mold/template)
+    RectangleShape block(Vector2f(TILE_SIZE - 1, TILE_SIZE - 1));
+    block.setOutlineThickness(1);
+    block.setOutlineColor(Color(50, 50, 50));
 
-    // BACKGROUND SCALING LOGIC
-    Vector2u textureSize = bg_tex.getSize(); 
-    float scaleX = (float)(COLS * TILE_SIZE + 150) / textureSize.x;
-    float scaleY = (float)(ROWS * TILE_SIZE) / textureSize.y;
-    s_bg.setScale(scaleX, scaleY);
-
-    // Font Setup
-    Font font;
-    font.loadFromFile("arial.ttf"); 
-    
-    Text scoreText;
-    scoreText.setFont(font);
-    scoreText.setCharacterSize(20);
-    scoreText.setFillColor(Color::White);
-    scoreText.setPosition(COLS * TILE_SIZE + 20, 20);
-
-    Text gameOverText("GAME OVER!", font, 30);
-    gameOverText.setFillColor(Color::Red);
-    gameOverText.setPosition((COLS * TILE_SIZE) / 2 - 60, (ROWS * TILE_SIZE) / 2 - 20);
-
-    // Rectangle Setup (Filled Blocks ke liye)
-    RectangleShape rectangle(Vector2f(TILE_SIZE - 1, TILE_SIZE - 1));
-    rectangle.setOutlineThickness(1);
-    rectangle.setOutlineColor(Color(50, 50, 50)); 
-
-    // --- NAYA HISSA: Empty Grid Box Setup ---
     RectangleShape emptyCell(Vector2f(TILE_SIZE, TILE_SIZE));
-    emptyCell.setFillColor(Color::Transparent); // Andar se khali taake background nazar aye
+    emptyCell.setFillColor(Color::Transparent);
     emptyCell.setOutlineThickness(1);
-    emptyCell.setOutlineColor(Color(255, 255, 255, 60)); // Halki si safaid (White) outline
-    // ----------------------------------------
+    emptyCell.setOutlineColor(Color(255, 255, 255, 40)); // Grid Lines
 
-    int dx = 0;
-    bool rotate_request = false;
-    int n_shape_type = 0;
     Clock clock;
+    spawnNewShape();
 
-    spawnNewShape(dx, n_shape_type);
-
-    // Main Game Loop
     while (window.isOpen()) {
         float time = clock.getElapsedTime().asSeconds();
         clock.restart();
-        timer += time;
+        gameTimer += time;
 
-        Event e;
-        while (window.pollEvent(e)) {
-            if (e.type == Event::Closed)
+        Event event;
+        while (window.pollEvent(event)) {
+            if (event.type == Event::Closed)
                 window.close();
 
-            if (e.type == Event::KeyPressed && !gameOver) {
-                if (e.key.code == Keyboard::Up) rotate_request = true;
-                else if (e.key.code == Keyboard::Left) dx = -1;
-                else if (e.key.code == Keyboard::Right) dx = 1;
+            if (event.type == Event::KeyPressed && !isGameOver) {
+                if (event.key.code == Keyboard::Up) {
+                    rotateShape(); // Up arrow se rotate
+                }
+                else if (event.key.code == Keyboard::Left) {
+                    if (isValidMove(currentX - 1, currentY, currentShape)) currentX--;
+                }
+                else if (event.key.code == Keyboard::Right) {
+                    if (isValidMove(currentX + 1, currentY, currentShape)) currentX++;
+                }
             }
         }
 
-        if (!gameOver) {
-            if (Keyboard::isKeyPressed(Keyboard::Down)) delay = 0.05;
-            else delay = 0.3;
+        // Fast Down Logic
+        if (Keyboard::isKeyPressed(Keyboard::Down)) dropDelay = 0.05;
+        else dropDelay = 0.3;
 
-            // Movement
-            if (dx != 0) {
-                for (int i = 0; i < 4; i++) backup_points[i] = falling_shape_points[i];
-                for (int i = 0; i < 4; i++) falling_shape_points[i].x += dx;
-                if (!check()) {
-                    for (int i = 0; i < 4; i++) falling_shape_points[i] = backup_points[i];
-                }
-                dx = 0;
-            }
-
-            // Rotation
-            if (rotate_request) {
-                for (int i = 0; i < 4; i++) backup_points[i] = falling_shape_points[i];
-                Point p = falling_shape_points[1];
-                for (int i = 0; i < 4; i++) {
-                    int original_x = falling_shape_points[i].x - p.x;
-                    int original_y = falling_shape_points[i].y - p.y;
-                    falling_shape_points[i].x = -original_y + p.x;
-                    falling_shape_points[i].y = original_x + p.y;
-                }
-                if (!check()) {
-                    for (int i = 0; i < 4; i++) falling_shape_points[i] = backup_points[i];
-                }
-                rotate_request = false;
-            }
-
-            // Falling & Locking
-            if (timer > delay) {
-                for (int i = 0; i < 4; i++) backup_points[i] = falling_shape_points[i];
-                for (int i = 0; i < 4; i++) falling_shape_points[i].y += 1;
-
-                if (!check()) {
-                    for (int i = 0; i < 4; i++) {
-                        grid[backup_points[i].y][backup_points[i].x] = n_shape_type + 1;
-                    }
-
-                    for (int row = ROWS - 1; row >= 0; row--) {
-                        int col_count = 0;
-                        for (int col = 0; col < COLS; col++) {
-                            if (grid[row][col] != 0) col_count++;
+        // AUTOMATIC FALLING LOGIC
+        if (!isGameOver && gameTimer > dropDelay) {
+            if (isValidMove(currentX, currentY + 1, currentShape)) {
+                currentY++; // Niche move karo
+            } else {
+                // Agar niche nahi ja sakta, toh grid mein lock kar do
+                for (int r = 0; r < 4; r++) {
+                    for (int c = 0; c < 4; c++) {
+                        if (currentShape[r][c] == 1) {
+                            gameGrid[currentY + r][currentX + c] = currentType + 1;
                         }
-                        if (col_count == COLS) {
-                            score += 100;
-                            for (int k = row; k > 0; k--) {
-                                for (int col = 0; col < COLS; col++) {
-                                    grid[k][col] = grid[k - 1][col];
-                                }
+                    }
+                }
+
+                // LINE CLEARING: Row check and shift logic
+                for (int r = ROWS - 1; r >= 0; r--) {
+                    int count = 0;
+                    for (int c = 0; c < COLS; c++) {
+                        if (gameGrid[r][c] != 0) count++;
+                    }
+                    if (count == COLS) {
+                        for (int k = r; k > 0; k--) {
+                            for (int c = 0; c < COLS; c++) {
+                                gameGrid[k][c] = gameGrid[k - 1][c];
                             }
-                            row++; 
                         }
-                    }
-
-                    spawnNewShape(dx, n_shape_type);
-                    
-                    if (!check()) {
-                        gameOver = true;
+                        r++; // Recheck row
                     }
                 }
-                timer = 0;
+
+                // Spawn next piece
+                spawnNewShape();
+
+                // Game Over Check
+                if (!isValidMove(currentX, currentY, currentShape)) {
+                    isGameOver = true;
+                }
             }
+            gameTimer = 0;
         }
 
         // --- DRAWING SECTION ---
-        window.clear(Color::Black); 
+        window.clear();
 
-        window.draw(s_bg);
+        // 1. Draw Fixed Background First
+        window.draw(backgroundSprite);
 
-        // Grid Draw Loop (Ab Empty aur Filled dono draw honge)
-        for (int i = 0; i < ROWS; i++) {
-            for (int j = 0; j < COLS; j++) {
-                if (grid[i][j] == 0) {
-                    // Agar jagah khali hai, toh transparent grid box draw karo
-                    emptyCell.setPosition(j * TILE_SIZE, i * TILE_SIZE);
+        // 2. Draw Grid Layout and Locked Blocks based on Array Logic
+        for (int r = 0; r < ROWS; r++) {
+            for (int c = 0; c < COLS; c++) {
+                if (gameGrid[r][c] == 0) {
+                    emptyCell.setPosition(c * TILE_SIZE, r * TILE_SIZE);
                     window.draw(emptyCell);
-                }
-                else { 
-                    // Agar block hai, toh color wala rectangle draw karo
-                    rectangle.setFillColor(colors[grid[i][j] - 1]);
-                    rectangle.setPosition(j * TILE_SIZE, i * TILE_SIZE);
-                    window.draw(rectangle);
+                } else {
+                    block.setFillColor(shapeColors[gameGrid[r][c] - 1]);
+                    block.setPosition(c * TILE_SIZE, r * TILE_SIZE);
+                    window.draw(block);
                 }
             }
         }
 
-        // Draw Active Falling Block
-        if (!gameOver) {
-            for (int i = 0; i < 4; i++) {
-                rectangle.setFillColor(colors[n_shape_type]);
-                rectangle.setPosition(falling_shape_points[i].x * TILE_SIZE, falling_shape_points[i].y * TILE_SIZE);
-                window.draw(rectangle);
+        // 3. Draw Active Falling Shape
+        if (!isGameOver) {
+            for (int r = 0; r < 4; r++) {
+                for (int c = 0; c < 4; c++) {
+                    if (currentShape[r][c] == 1) {
+                        block.setFillColor(shapeColors[currentType]);
+                        block.setPosition((currentX + c) * TILE_SIZE, (currentY + r) * TILE_SIZE);
+                        window.draw(block);
+                    }
+                }
             }
-        }
-
-        scoreText.setString("Score:\n" + to_string(score));
-        window.draw(scoreText);
-
-        if (gameOver) {
-            window.draw(gameOverText);
         }
 
         window.display();
